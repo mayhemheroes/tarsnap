@@ -100,11 +100,11 @@ err0:
 }
 
 /**
- * lru_remove(S, CF):
- * Remove ${CF} from its current position in the LRU queue for ${S}.
+ * lru_remove(cache, CF):
+ * Remove ${CF} from its current position in the LRU queue for ${cache}.
  */
 static void
-lru_remove(STORAGE_R * S, struct read_file_cached * CF)
+lru_remove(struct storage_read_cache * cache, struct read_file_cached * CF)
 {
 
 	/* Sanity check: We should be in the queue. */
@@ -115,17 +115,17 @@ lru_remove(STORAGE_R * S, struct read_file_cached * CF)
 	if (CF->next_mru != NULL)
 		CF->next_mru->next_lru = CF->next_lru;
 	else
-		S->cache->mru = CF->next_lru;
+		cache->mru = CF->next_lru;
 
 	/* Our MRU file is now someone else's MRU file. */
 	if (CF->next_lru != NULL)
 		CF->next_lru->next_mru = CF->next_mru;
 	else
-		S->cache->lru = CF->next_mru;
+		cache->lru = CF->next_mru;
 
 	/* We're no longer in the queue. */
 	CF->inqueue = 0;
-	S->cache->sz -= CF->buflen;
+	cache->sz -= CF->buflen;
 
 	/* We no longer have an MRU or LRU file. */
 	CF->next_mru = NULL;
@@ -133,11 +133,11 @@ lru_remove(STORAGE_R * S, struct read_file_cached * CF)
 }
 
 /**
- * lru_add(S, CF):
- * Record ${CF} as the most recently used cached file in ${S}.
+ * lru_add(cache, CF):
+ * Record ${CF} as the most recently used cached file in ${cache}.
  */
 static void
-lru_add(STORAGE_R * S, struct read_file_cached * CF)
+lru_add(struct storage_read_cache * cache, struct read_file_cached * CF)
 {
 
 	/* Sanity check: We should not be in the queue yet. */
@@ -147,40 +147,40 @@ lru_add(STORAGE_R * S, struct read_file_cached * CF)
 	CF->next_mru = NULL;
 
 	/* ... the formerly MRU file is less recently used than us... */
-	CF->next_lru = S->cache->mru;
+	CF->next_lru = cache->mru;
 
 	/* ... we're more recently used than any formerly MRU file... */
 	if (CF->next_lru != NULL)
 		CF->next_lru->next_mru = CF;
 
 	/* ... and more recently used than nothing... */
-	if (S->cache->lru == NULL)
-		S->cache->lru = CF;
+	if (cache->lru == NULL)
+		cache->lru = CF;
 
 	/* ... and we're now the MRU file. */
-	S->cache->mru = CF;
+	cache->mru = CF;
 
 	/* We're now in the queue. */
 	CF->inqueue = 1;
-	S->cache->sz += CF->buflen;
+	cache->sz += CF->buflen;
 }
 
 /**
- * cache_prune(S):
- * Prune the cache for ${S} down to size.
+ * cache_prune(cache):
+ * Prune the cache ${cache} down to size.
  */
 static void
-cache_prune(STORAGE_R * S)
+cache_prune(struct storage_read_cache * cache)
 {
 	struct read_file_cached * CF;
 
 	/* While the cache is too big... */
-	while (S->cache->sz > S->cache->maxsz) {
+	while (cache->sz > cache->maxsz) {
 		/* Find the LRU cached file. */
-		CF = S->cache->lru;
+		CF = cache->lru;
 
 		/* Remove this file from the LRU list. */
-		lru_remove(S, CF);
+		lru_remove(cache, CF);
 
 		/* Free its data. */
 		free(CF->buf);
@@ -240,7 +240,7 @@ storage_read_add_name_cache(STORAGE_R * S, char class, const uint8_t name[32])
 	struct read_file_cached * CF;
 
 	/* Prune the cache if necessary. */
-	cache_prune(S);
+	cache_prune(S->cache);
 
 	/* Is this file already marked as needing to be cached? */
 	classname[0] = (uint8_t)class;
@@ -248,10 +248,10 @@ storage_read_add_name_cache(STORAGE_R * S, char class, const uint8_t name[32])
 	if ((CF = rwhashtab_read(S->cache->ht, classname)) != NULL) {
 		/* If we're in the linked list, remove ourselves from it. */
 		if (CF->inqueue)
-			lru_remove(S, CF);
+			lru_remove(S->cache, CF);
 
 		/* Insert ourselves at the head of the list. */
-		lru_add(S, CF);
+		lru_add(S->cache, CF);
 
 		/* That's all we need to do. */
 		goto done;
@@ -270,7 +270,7 @@ storage_read_add_name_cache(STORAGE_R * S, char class, const uint8_t name[32])
 		goto err1;
 
 	/* Add it to the LRU queue. */
-	lru_add(S, CF);
+	lru_add(S->cache, CF);
 
 done:
 	/* Success! */
@@ -284,13 +284,13 @@ err0:
 }
 
 /**
- * storage_read_cache_add_data(S, class, name, buf, buflen):
+ * storage_read_cache_add_data(cache, class, name, buf, buflen):
  * If the file ${name} with class ${class} has previous been flagged for
- * storage in the cache for ${S} via storage_read_add_name_cache(), add
+ * storage in the ${cache} via storage_read_cache_add_name(), add
  * ${buflen} data from ${buf} to the cache.
  */
 static void
-storage_read_cache_add_data(STORAGE_R * S, char class,
+storage_read_cache_add_data(struct storage_read_cache * cache, char class,
     const uint8_t name[32], uint8_t * buf, size_t buflen)
 {
 	struct read_file_cached * CF;
@@ -298,7 +298,7 @@ storage_read_cache_add_data(STORAGE_R * S, char class,
 
 	classname[0] = (uint8_t)class;
 	memcpy(&classname[1], name, 32);
-	if (((CF = rwhashtab_read(S->cache->ht, classname)) != NULL) &&
+	if (((CF = rwhashtab_read(cache->ht, classname)) != NULL) &&
 	    (CF->inqueue != 0) && (CF->buf == NULL)) {
 		/* Make a copy of this buffer if we can. */
 		if ((CF->buf = malloc(buflen)) != NULL) {
@@ -307,7 +307,7 @@ storage_read_cache_add_data(STORAGE_R * S, char class,
 			memcpy(CF->buf, buf, buflen);
 
 			/* We've got more data cached now. */
-			S->cache->sz += CF->buflen;
+			cache->sz += CF->buflen;
 		}
 	}
 }
@@ -326,8 +326,8 @@ storage_read_set_cache_limit(STORAGE_R * S, size_t size)
 
 /* Look for a file in the cache. */
 static void
-storage_read_cache_find(STORAGE_R * S, char class, const uint8_t name[32],
-    uint8_t ** buf, size_t * buflen)
+storage_read_cache_find(struct storage_read_cache * cache, char class,
+    const uint8_t name[32], uint8_t ** buf, size_t * buflen)
 {
 	uint8_t classname[33];
 	struct read_file_cached * CF;
@@ -339,7 +339,7 @@ storage_read_cache_find(STORAGE_R * S, char class, const uint8_t name[32],
 	/* Search for a cache entry. */
 	classname[0] = (uint8_t)class;
 	memcpy(&classname[1], name, 32);
-	if ((CF = rwhashtab_read(S->cache->ht, classname)) != NULL) {
+	if ((CF = rwhashtab_read(cache->ht, classname)) != NULL) {
 		/* Found it! */
 		*buf = CF->buf;
 		*buflen = CF->buflen;
@@ -362,7 +362,8 @@ storage_read_file(STORAGE_R * S, uint8_t * buf, size_t buflen,
 	size_t cached_buflen;
 
 	/* Can we serve this from our cache? */
-	storage_read_cache_find(S, class, name, &cached_buf, &cached_buflen);
+	storage_read_cache_find(S->cache, class, name, &cached_buf,
+	    &cached_buflen);
 	if (cached_buf != NULL) {
 		if (buflen != cached_buflen) {
 			/* Bad length. */
@@ -413,7 +414,8 @@ storage_read_file_alloc(STORAGE_R * S, uint8_t ** buf,
 	size_t cached_buflen;
 
 	/* Can we serve this from our cache? */
-	storage_read_cache_find(S, class, name, &cached_buf, &cached_buflen);
+	storage_read_cache_find(S->cache, class, name, &cached_buf,
+	    &cached_buflen);
 	if (cached_buf != NULL) {
 		/* Allocate a buffer and copy data out. */
 		if ((*buf = malloc(cached_buflen)) == NULL)
@@ -611,7 +613,7 @@ callback_read_file_response(void * cookie, NETPACKET_CONNECTION * NPC,
 
 		/* Should we cache this data? */
 		if (sc == 0) {
-			storage_read_cache_add_data(C->S,
+			storage_read_cache_add_data(C->S->cache,
 			    (char)C->class, C->name, C->buf, C->buflen);
 		}
 	}
