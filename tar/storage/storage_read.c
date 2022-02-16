@@ -549,18 +549,20 @@ callback_read_file_response(void * cookie, NETPACKET_CONNECTION * NPC,
 		}
 
 		/* Should we cache this data? */
-		classname[0] = C->class;
-		memcpy(&classname[1], C->name, 32);
-		if (((CF = rwhashtab_read(C->S->cache_ht, classname)) != NULL) &&
-		    (CF->inqueue != 0) && (CF->buf == NULL) && (sc == 0)) {
-			/* Make a copy of this buffer if we can. */
-			if ((CF->buf = malloc(C->buflen)) != NULL) {
-				/* Copy in data and data length. */
-				CF->buflen = C->buflen;
-				memcpy(CF->buf, C->buf, C->buflen);
+		if (sc == 0) {
+			classname[0] = C->class;
+			memcpy(&classname[1], C->name, 32);
+			if (((CF = rwhashtab_read(C->S->cache_ht, classname)) != NULL) &&
+			    (CF->inqueue != 0) && (CF->buf == NULL)) {
+				/* Make a copy of this buffer if we can. */
+				if ((CF->buf = malloc(C->buflen)) != NULL) {
+					/* Copy in data and data length. */
+					CF->buflen = C->buflen;
+					memcpy(CF->buf, C->buf, C->buflen);
 
-				/* We've got more data cached now. */
-				C->S->cachesz += CF->buflen;
+					/* We've got more data cached now. */
+					C->S->cachesz += CF->buflen;
+				}
 			}
 		}
 	}
