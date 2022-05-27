@@ -1,0 +1,6 @@
+project: rnshah9/tarsnap
+target: tarsnap
+tests: null
+
+cmds:
+  - cmd: /repo/tarsnap-keymgmt --outkeyfile out -r @@
