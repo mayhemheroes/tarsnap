@@ -1,5 +1,5 @@
 project: rnshah9/tarsnap
-target: tarsnap
+target: tarsnap-keymgmt
 tests: null
 
 cmds:
