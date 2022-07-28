@@ -2,4 +2,4 @@ project: tarsnap
 target: tarsnap-keymgmt
 
 cmds:
-  - cmd: /repo/tarsnap-keymgmt --outkeyfile out -r @@
+  - cmd: /install/bin/tarsnap-keymgmt --outkeyfile out -r @@
